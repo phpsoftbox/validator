@@ -6,6 +6,10 @@ namespace PhpSoftBox\Validator\Tests;
 
 use InvalidArgumentException;
 use LogicException;
+use PhpSoftBox\Filter\BooleanFilter;
+use PhpSoftBox\Filter\DefaultFilter;
+use PhpSoftBox\Filter\IntegerFilter;
+use PhpSoftBox\Filter\TrimFilter;
 use PhpSoftBox\Validator\Exception\FilterPayloadException;
 use PhpSoftBox\Validator\Support\FilterPayloadApplier;
 use PhpSoftBox\Validator\Support\FilterPayloadResult;
@@ -149,25 +153,95 @@ final class FilterPayloadApplierTest extends TestCase
     }
 
     /**
-     * Проверяет, что фильтр не вызывается для отсутствующего точечного пути и поле не создаётся.
+     * Проверим, что умолчание фильтра для непереданного поля попадает в payload.
      *
      * @see FilterPayloadApplier::apply()
      */
     #[Test]
-    public function skipsMissingExactPath(): void
+    public function missingExactPathReceivesFilterDefault(): void
     {
-        $applier = new FilterPayloadApplier();
-
-        $result = $applier->apply(
+        $result = new FilterPayloadApplier()->apply(
             payload: ['user' => ['name' => 'Alice']],
             filters: [
-                'user.phone' => static fn (mixed $value): string => $value === null ? 'unknown' : (string) $value,
+                'status'     => static fn (mixed $value): mixed => $value ?? 'all',
+                'user.phone' => [
+                    static fn (mixed $value): mixed => $value,
+                    static fn (mixed $value): mixed => $value ?? 'unknown',
+                ],
             ],
         );
 
-        // Непереданное поле остаётся непереданным, а не превращается в null или значение фильтра.
+        self::assertSame([], $result->errors);
+        self::assertSame(['user' => ['name' => 'Alice', 'phone' => 'unknown'], 'status' => 'all'], $result->payload);
+    }
+
+    /**
+     * Проверим умолчания фильтров phpsoftbox/filter для непереданных полей: `DefaultFilter`, `IntegerFilter`,
+     * `BooleanFilter` подставляют значение, `TrimFilter` без умолчания поле не создаёт.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function missingExactPathsReceiveFilterPackageDefaults(): void
+    {
+        $result = new FilterPayloadApplier()->apply(
+            payload: ['search' => ' box '],
+            filters: [
+                'search'  => [new TrimFilter()],
+                'status'  => [new DefaultFilter('all')],
+                'page'    => [new IntegerFilter(1)],
+                'only_my' => [new BooleanFilter(false)],
+                'comment' => [new TrimFilter()],
+            ],
+        );
+
+        self::assertSame([], $result->errors);
+        self::assertSame(
+            ['search' => 'box', 'status' => 'all', 'page' => 1, 'only_my' => false],
+            $result->payload,
+        );
+    }
+
+    /**
+     * Проверим, что непереданное поле не создаётся, если фильтр вернул null или '': необязательные правила видят
+     * «не передано», а не пустое значение.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function missingExactPathStaysMissingWhenFilterReturnsNull(): void
+    {
+        $result = new FilterPayloadApplier()->apply(
+            payload: ['user' => ['name' => 'Alice']],
+            filters: [
+                'user.phone' => static fn (mixed $value): mixed => $value,
+                'user.email' => static fn (mixed $value): string => (string) $value,
+            ],
+        );
+
         self::assertSame([], $result->errors);
         self::assertSame(['user' => ['name' => 'Alice']], $result->payload);
+    }
+
+    /**
+     * Проверим, что ошибка фильтра на непереданном поле не становится ошибкой валидации: поле остаётся непереданным.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function missingExactPathIgnoresFilterError(): void
+    {
+        $result = new FilterPayloadApplier()->apply(
+            payload: [],
+            filters: [
+                'qty' => static function (mixed $value): never {
+                    throw new InvalidArgumentException('qty must be numeric');
+                },
+            ],
+        );
+
+        self::assertSame([], $result->errors);
+        self::assertSame([], $result->payload);
     }
 
     /**

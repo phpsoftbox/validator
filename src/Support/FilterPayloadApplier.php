@@ -21,6 +21,9 @@ use function str_contains;
 /**
  * Применяет фильтры к payload по dot-путям и wildcard.
  *
+ * Для отсутствующего точного пути фильтры вызываются с null: результат-умолчание записывается в payload, null и ''
+ * — поле не создаётся. Wildcard-пути фильтруют только существующие элементы.
+ *
  * Фильтр — `Closure` или invokable-объект (например, `FilterInterface`), либо список таких фильтров. Массив всегда
  * считается списком: `[$object, 'method']` и строки-функции не принимаются (`LogicException`), чтобы значение не
  * исполнялось как произвольный callable.
@@ -63,8 +66,21 @@ final class FilterPayloadApplier
                 continue;
             }
 
-            // Отсутствующее поле не создаётся: иначе optional-правила получат null вместо «не передано».
             if (!DataPath::has($payload, $path)) {
+                // Отсутствующее поле: фильтры получают null. Поле создаётся, только если фильтр подставил умолчание
+                // (`DefaultFilter('all')`, `IntegerFilter(1)`); null, '' (`TrimFilter` от null) и ошибка фильтра
+                // оставляют поле непереданным — иначе необязательные правила получили бы пустое значение вместо
+                // «не передано».
+                try {
+                    $value = $this->run(null, $filter);
+                } catch (FilterPayloadException) {
+                    continue;
+                }
+
+                if ($value !== null && $value !== '') {
+                    DataPath::set($patch, $path, $value);
+                }
+
                 continue;
             }
 
