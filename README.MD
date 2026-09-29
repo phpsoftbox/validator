@@ -46,9 +46,23 @@ if ($result->hasErrors()) {
 Typed getters читают `filteredData()` — только проверенные поля (см. [docs/01-usage.md](docs/01-usage.md#filtereddata)).
 
 `AbstractFormValidation::applyPayloadFilters()` (`Support\FilterPayloadApplier`) применяет фильтры
-к payload до валидации по dot‑путям и wildcard. Фильтр вызывается только для переданных полей:
-отсутствующее поле не создаётся (иначе необязательные правила получили бы `null` вместо
-«поле не передано»). Значения по умолчанию задавайте явно, а не через фильтр.
+к payload до валидации по dot‑путям и wildcard. Для непереданного поля (точный путь) фильтры вызываются с `null`:
+если результат — умолчание (`DefaultFilter('all')`, `IntegerFilter(1)`, `BooleanFilter(false)`), поле появляется в
+payload; если `null` или `''` (например, `TrimFilter` от `null`) либо фильтр бросил исключение — поле остаётся
+непереданным, и необязательные правила видят «не передано», а не пустое значение. Wildcard-пути (`items.*.qty`)
+фильтруют только существующие элементы.
+
+```php
+public function filters(): array
+{
+    return [
+        'status'  => [new DefaultFilter('all')],  // нет в запросе → 'all'
+        'page'    => [new IntegerFilter(1)],      // нет в запросе → 1
+        'comment' => [new TrimFilter()],          // нет в запросе → поля нет
+    ];
+}
+```
+
 Фильтр — `Closure` или invokable-объект (`FilterInterface`), либо список таких фильтров; строки-функции и
 `[$object, 'method']` отклоняются с `LogicException`.
 
