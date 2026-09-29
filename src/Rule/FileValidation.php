@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpSoftBox\Validator\Rule;
 
+use InvalidArgumentException;
 use PhpSoftBox\Validator\ValidationEnum;
 use PhpSoftBox\Validator\ValidationViolation;
 use Psr\Http\Message\StreamInterface;
@@ -23,12 +24,12 @@ use function finfo_open;
 use function function_exists;
 use function getimagesizefromstring;
 use function in_array;
-use function is_numeric;
 use function is_string;
 use function mb_detect_encoding;
 use function pathinfo;
 use function preg_match;
 use function round;
+use function sprintf;
 use function strlen;
 use function strtolower;
 use function trim;
@@ -343,28 +344,34 @@ final class FileValidation extends AbstractRule
         return array_unique($normalized);
     }
 
+    /**
+     * Перевести размер в байты: число — килобайты, строка — число с единицей
+     * (b, kb, mb, gb, tb) или без неё (килобайты).
+     *
+     * @throws InvalidArgumentException Если размер отрицательный или единица измерения неизвестна.
+     */
     private function toBytes(int|float|string $size): int
     {
         if (is_string($size)) {
-            $match = [];
-            if (!preg_match('/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)$/i', trim($size), $match)) {
-                return (int) round((float) $size * 1024);
+            $trimmed = trim($size);
+            $match   = [];
+            if (preg_match('/^(\d+(?:\.\d+)?)\s*([a-z]*)\z/i', $trimmed, $match) !== 1) {
+                throw new InvalidArgumentException(sprintf('Некорректный размер файла: "%s".', $size));
             }
 
-            $value = (float) $match[1];
-            $unit  = strtolower($match[2]);
+            $unit = $match[2] === '' ? 'kb' : strtolower($match[2]);
 
-            return (int) round($value * $this->unitMultiplier($unit));
+            return (int) round((float) $match[1] * $this->unitMultiplier($unit, $size));
         }
 
-        if (is_numeric($size)) {
-            return (int) round((float) $size * 1024);
+        if ($size < 0) {
+            throw new InvalidArgumentException(sprintf('Размер файла не может быть отрицательным: %s.', $size));
         }
 
-        return (int) $size;
+        return (int) round((float) $size * 1024);
     }
 
-    private function unitMultiplier(string $unit): int
+    private function unitMultiplier(string $unit, string $size): int
     {
         return match ($unit) {
             'b'     => 1,
@@ -372,7 +379,11 @@ final class FileValidation extends AbstractRule
             'mb'    => 1024 * 1024,
             'gb'    => 1024 * 1024 * 1024,
             'tb'    => 1024 * 1024 * 1024 * 1024,
-            default => 1024,
+            default => throw new InvalidArgumentException(sprintf(
+                'Неизвестная единица размера файла "%s" в "%s", допустимы: b, kb, mb, gb, tb.',
+                $unit,
+                $size,
+            )),
         };
     }
 

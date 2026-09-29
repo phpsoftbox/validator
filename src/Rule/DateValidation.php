@@ -17,6 +17,7 @@ use function in_array;
 use function is_array;
 use function is_int;
 use function is_string;
+use function str_contains;
 use function strtotime;
 
 /**
@@ -177,18 +178,22 @@ final class DateValidation extends AbstractRule
             return $violations;
         }
 
-        $date = $this->toDateTime($value, $this->date);
-        if ($date === null) {
-            $violations[] = new ValidationViolation(ValidationEnum::DATE->value);
-
-            return $violations;
-        }
-
-        if ($this->formats !== []) {
-            if (!$this->matchesAnyFormat($value, $this->formats)) {
+        if ($this->formats !== [] && !$value instanceof DateTimeInterface) {
+            // Значение, привязанное к формату, разбирается только по этому формату.
+            $date = $this->parseByFormats($value);
+            if ($date === null) {
                 $violations[] = new ValidationViolation(ValidationEnum::DATE_FORMAT->value, [
                     'formats' => $this->formats,
                 ]);
+
+                return $violations;
+            }
+        } else {
+            $date = $this->toDateTime($value, $this->date);
+            if ($date === null) {
+                $violations[] = new ValidationViolation(ValidationEnum::DATE->value);
+
+                return $violations;
             }
         }
 
@@ -256,27 +261,36 @@ final class DateValidation extends AbstractRule
         return $this->date || $this->formats !== [] || $this->comparisons !== [];
     }
 
-    private function matchesAnyFormat(mixed $value, array $formats): bool
+    /**
+     * Строго разобрать значение по одному из форматов dateFormat().
+     *
+     * Незаданные в формате части даты/времени обнуляются (модификатор `!`), значение
+     * должно разбираться без ошибок и предупреждений и совпадать с форматированным обратно.
+     */
+    private function parseByFormats(mixed $value): ?DateTimeImmutable
     {
-        if ($value instanceof DateTimeInterface) {
-            return $formats !== [];
-        }
-
         if (!is_string($value)) {
-            return false;
+            return null;
         }
 
-        foreach ($formats as $format) {
-            $dt = DateTimeImmutable::createFromFormat($format, $value);
-            if ($dt === false) {
+        foreach ($this->formats as $format) {
+            $parseFormat = str_contains($format, '!') || str_contains($format, '|') ? $format : '!' . $format;
+            $date        = DateTimeImmutable::createFromFormat($parseFormat, $value);
+            if ($date === false) {
                 continue;
             }
-            if ($dt->format($format) === $value) {
-                return true;
+
+            $errors = DateTimeImmutable::getLastErrors();
+            if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
+                continue;
+            }
+
+            if ($date->format($format) === $value) {
+                return $date;
             }
         }
 
-        return false;
+        return null;
     }
 
     private function resolveTargetDate(array $data, mixed $target): ?DateTimeImmutable
@@ -290,7 +304,17 @@ final class DateValidation extends AbstractRule
         }
 
         if (DataPath::has($data, $target)) {
-            return $this->toDateTime(DataPath::get($data, $target), false);
+            $other = DataPath::get($data, $target);
+
+            // Значение другого поля сначала разбирается по форматам dateFormat() (например, d/m/Y).
+            if ($this->formats !== []) {
+                $date = $this->parseByFormats($other);
+                if ($date !== null) {
+                    return $date;
+                }
+            }
+
+            return $this->toDateTime($other, false);
         }
 
         return $this->toDateTime($target, false);

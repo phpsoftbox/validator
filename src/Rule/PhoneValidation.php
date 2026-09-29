@@ -14,6 +14,9 @@ use function is_string;
 
 /**
  * Проверяет корректность номера телефона через драйверы стран.
+ *
+ * Значение не изменяется: для приведения номера к формату хранения используйте
+ * фильтр `PhoneFilter` / `FilterAdapter::phone()` из `phpsoftbox/filter`.
  */
 final class PhoneValidation extends AbstractRule
 {
@@ -21,16 +24,6 @@ final class PhoneValidation extends AbstractRule
      * Драйвер конкретной страны.
      */
     private PhoneCountryDriverInterface $driver;
-
-    /**
-     * Возвращать формат для хранения в БД.
-     */
-    private bool $prepareForDb = true;
-
-    /**
-     * Форматировать с кодом страны.
-     */
-    private bool $withCountryCode = false;
 
     public function __construct(PhoneDriverEnum $driver = PhoneDriverEnum::RU)
     {
@@ -44,28 +37,16 @@ final class PhoneValidation extends AbstractRule
         return $this;
     }
 
-    public function prepareForDb(bool $value = true): self
-    {
-        $this->prepareForDb = $value;
-
-        return $this;
-    }
-
-    public function withCountryCode(bool $value = true): self
-    {
-        $this->withCountryCode = $value;
-
-        return $this;
-    }
-
     public function validate(mixed $value, string $field, bool $present, array $data): array
     {
         if (!is_string($value) && !is_numeric($value)) {
             return [new ValidationViolation(ValidationEnum::PHONE->value)];
         }
 
-        $raw    = (string) $value;
-        $result = $this->driver->format($raw, $this->prepareForDb, $this->withCountryCode);
+        $raw = (string) $value;
+
+        // Правило только проверяет номер; нормализация значения выполняется фильтром PhoneFilter.
+        $result = $this->driver->format($raw, prepareForDb: true, withCountryCode: false);
 
         if ($result->isValid()) {
             return [];

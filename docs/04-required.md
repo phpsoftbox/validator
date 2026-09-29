@@ -8,9 +8,14 @@ use PhpSoftBox\Validator\Rule\StringValidation;
 $rule = (new StringValidation())->required();
 ```
 
+Если обязательное поле отсутствует или пустое (`null`, `''`, `[]`), возвращается только
+ошибка `required` (или `required_*`), остальные правила этого поля не выполняются —
+в любом режиме остановки.
+
 ## nullable
 
-Если значение пустое и правило nullable — валидатор пропускает остальные проверки.
+Если значение пустое и правило nullable — валидатор пропускает остальные проверки,
+а значение (например, `null`) попадает в `filteredData`.
 
 ```php
 $rule = (new StringValidation())->nullable();

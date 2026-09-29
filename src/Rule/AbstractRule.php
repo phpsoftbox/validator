@@ -308,12 +308,23 @@ abstract class AbstractRule implements ValidationRuleInterface
     }
 
     /**
+     * Установить данные и контекст текущей проверки (вызывается валидатором перед validate()).
+     *
      * @param array<string, mixed> $data
      */
     public function setRuntimeState(array $data, mixed $context): void
     {
         $this->runtimeData    = $data;
         $this->runtimeContext = $context;
+    }
+
+    /**
+     * Сбросить данные и контекст проверки, чтобы правило не удерживало payload запроса.
+     */
+    public function resetRuntimeState(): void
+    {
+        $this->runtimeData    = [];
+        $this->runtimeContext = null;
     }
 
     protected function route(string $param, mixed $default = null): mixed

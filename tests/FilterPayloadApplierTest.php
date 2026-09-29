@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace PhpSoftBox\Validator\Tests;
 
 use InvalidArgumentException;
+use LogicException;
 use PhpSoftBox\Validator\Exception\FilterPayloadException;
 use PhpSoftBox\Validator\Support\FilterPayloadApplier;
 use PhpSoftBox\Validator\Support\FilterPayloadResult;
+use PhpSoftBox\Validator\Tests\Fixtures\UppercasePayloadFilter;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversMethod;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -19,6 +22,7 @@ use function trim;
 
 #[CoversClass(FilterPayloadApplier::class)]
 #[CoversClass(FilterPayloadResult::class)]
+#[CoversMethod(FilterPayloadApplier::class, 'apply')]
 final class FilterPayloadApplierTest extends TestCase
 {
     /**
@@ -145,10 +149,12 @@ final class FilterPayloadApplierTest extends TestCase
     }
 
     /**
-     * Проверяет, что для отсутствующего точечного пути фильтр получает null и может записать значение.
+     * Проверяет, что фильтр не вызывается для отсутствующего точечного пути и поле не создаётся.
+     *
+     * @see FilterPayloadApplier::apply()
      */
     #[Test]
-    public function appliesFilterForMissingExactPath(): void
+    public function skipsMissingExactPath(): void
     {
         $applier = new FilterPayloadApplier();
 
@@ -159,9 +165,9 @@ final class FilterPayloadApplierTest extends TestCase
             ],
         );
 
+        // Непереданное поле остаётся непереданным, а не превращается в null или значение фильтра.
         self::assertSame([], $result->errors);
-        self::assertSame('unknown', $result->payload['user']['phone']);
-        self::assertSame('Alice', $result->payload['user']['name']);
+        self::assertSame(['user' => ['name' => 'Alice']], $result->payload);
     }
 
     /**
@@ -181,5 +187,50 @@ final class FilterPayloadApplierTest extends TestCase
         $withoutErrors = new FilterPayloadResult(['ok' => true]);
 
         self::assertSame([], $withoutErrors->errors);
+    }
+
+    /**
+     * Проверим, что invokable-объект принимается как фильтр и в списке, и отдельно.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function acceptsInvokableObjects(): void
+    {
+        $result = new FilterPayloadApplier()->apply(
+            payload: ['a' => 'x', 'b' => 'y'],
+            filters: ['a' => new UppercasePayloadFilter(), 'b' => [new UppercasePayloadFilter()]],
+        );
+
+        self::assertSame(['a' => 'X', 'b' => 'Y'], $result->payload);
+    }
+
+    /**
+     * Проверим, что строка-функция не исполняется как фильтр.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function rejectsFunctionName(): void
+    {
+        $this->expectException(LogicException::class);
+
+        new FilterPayloadApplier()->apply(payload: ['a' => ' x '], filters: ['a' => 'trim']);
+    }
+
+    /**
+     * Проверим, что массив `[$object, 'method']` считается списком фильтров и отклоняется, а не вызывается.
+     *
+     * @see FilterPayloadApplier::apply()
+     */
+    #[Test]
+    public function rejectsCallableArray(): void
+    {
+        $this->expectException(LogicException::class);
+
+        new FilterPayloadApplier()->apply(
+            payload: ['a' => 'x'],
+            filters: ['a' => [new UppercasePayloadFilter(), '__invoke']],
+        );
     }
 }
