@@ -7,16 +7,22 @@ namespace PhpSoftBox\Validator;
 use InvalidArgumentException;
 use PhpSoftBox\Validator\Exception\RuleExecutorNotFoundException;
 use PhpSoftBox\Validator\Rule\AbstractRule;
+use PhpSoftBox\Validator\Rule\AnyOfValidation;
 use PhpSoftBox\Validator\Rule\Executor\RuleExecutorRegistryInterface;
 use PhpSoftBox\Validator\Rule\RuleSpecificationInterface;
 use PhpSoftBox\Validator\Rule\ValidationRuleInterface;
 use PhpSoftBox\Validator\Support\DataPath;
 use PhpSoftBox\Validator\Support\MessageFormatter;
+use PhpSoftBox\Validator\Support\PathValue;
 
 use function array_key_exists;
+use function array_keys;
 use function array_merge;
+use function count;
+use function explode;
 use function is_array;
 use function is_string;
+use function str_starts_with;
 
 final class Validator implements ValidatorInterface
 {
@@ -36,7 +42,12 @@ final class Validator implements ValidatorInterface
         $options ??= new ValidationOptions();
 
         $errors   = [];
-        $filtered = [];
+        $passed   = [];
+        $excluded = [];
+        $patterns = [];
+        foreach ($rules as $fieldPattern => $ruleSet) {
+            $patterns[] = (string) $fieldPattern;
+        }
 
         foreach ($rules as $fieldPattern => $ruleSet) {
             $ruleList = $this->normalizeRules($ruleSet);
@@ -49,13 +60,14 @@ final class Validator implements ValidatorInterface
                 $present = $pathValue->present;
 
                 if ($this->shouldExclude($ruleList, $data, $context, $field)) {
-                    DataPath::forget($filtered, $field);
+                    $excluded[] = $field;
                     continue;
                 }
 
                 $requiredViolation = $this->requiredViolation($ruleList, $data, $context, $field);
 
-                if (!$present) {
+                // Отсутствующее или пустое обязательное поле: ошибка required, остальные правила не выполняются.
+                if (!$present || $this->isEmpty($value)) {
                     if ($requiredViolation !== null) {
                         $this->addError(
                             $errors,
@@ -68,34 +80,17 @@ final class Validator implements ValidatorInterface
                             $ruleList,
                         );
                         if ($options->stopMode === ValidationStopMode::FIRST_ERROR) {
-                            return new ValidationResult($errors, $filtered);
+                            return $this->result($errors, $passed, $excluded, $patterns);
                         }
-                        if ($useBail) {
-                            continue;
-                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                if ($this->isEmpty($value)) {
-                    if ($requiredViolation !== null) {
-                        $this->addError(
-                            $errors,
-                            $field,
-                            $requiredViolation->rule,
-                            $value,
-                            $requiredViolation->params,
-                            $messages,
-                            $attributes,
-                            $ruleList,
-                        );
-                        if ($options->stopMode === ValidationStopMode::FIRST_ERROR) {
-                            return new ValidationResult($errors, $filtered);
-                        }
-                        if ($useBail) {
-                            continue;
-                        }
-                    } elseif ($this->isNullable($ruleList)) {
+                    if (!$present) {
+                        continue;
+                    }
+
+                    if ($this->isNullable($ruleList)) {
+                        $passed[] = new PathValue($field, $value, true);
                         continue;
                     }
                 }
@@ -120,7 +115,7 @@ final class Validator implements ValidatorInterface
                         );
 
                         if ($options->stopMode === ValidationStopMode::FIRST_ERROR) {
-                            return new ValidationResult($errors, $filtered);
+                            return $this->result($errors, $passed, $excluded, $patterns);
                         }
                         if ($options->stopMode === ValidationStopMode::FIRST_PER_FIELD) {
                             break 2;
@@ -131,17 +126,102 @@ final class Validator implements ValidatorInterface
                     }
                 }
 
-                if (!array_key_exists($field, $errors)) {
-                    DataPath::set($filtered, $field, $value);
-                }
+                $passed[] = $pathValue;
             }
+        }
+
+        return $this->result($errors, $passed, $excluded, $patterns);
+    }
+
+    /**
+     * Собрать результат: в filteredData попадают только поля, покрытые правилами и прошедшие проверку.
+     *
+     * @param array<string, list<ValidationError>> $errors
+     * @param list<PathValue> $passed
+     * @param list<string> $excluded
+     * @param list<string> $patterns
+     */
+    private function result(array $errors, array $passed, array $excluded, array $patterns): ValidationResult
+    {
+        $failed   = array_keys($errors);
+        $filtered = [];
+
+        foreach ($passed as $entry) {
+            $path = $entry->path;
+
+            // Поле (или его родитель) с ошибкой либо исключённое поле в результат не попадает.
+            if ($this->coveredBy($path, $failed) || $this->coveredBy($path, $excluded)) {
+                continue;
+            }
+
+            // Если для вложенных путей есть свои правила, массив не копируется целиком:
+            // в результат попадут только проверенные вложенные поля.
+            if (is_array($entry->value) && $this->hasNestedRules($path, $patterns)) {
+                if (!DataPath::has($filtered, $path)) {
+                    DataPath::set($filtered, $path, []);
+                }
+                continue;
+            }
+
+            DataPath::set($filtered, $path, $entry->value);
         }
 
         return new ValidationResult($errors, $filtered);
     }
 
     /**
+     * Совпадает ли путь с одним из путей списка или вложен в него.
+     *
+     * @param list<string|int> $paths
+     */
+    private function coveredBy(string $path, array $paths): bool
+    {
+        foreach ($paths as $candidate) {
+            $candidate = (string) $candidate;
+            if ($path === $candidate || str_starts_with($path, $candidate . '.')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Есть ли правила для путей, вложенных в указанный конкретный путь.
+     *
+     * @param list<string> $patterns
+     */
+    private function hasNestedRules(string $path, array $patterns): bool
+    {
+        $pathSegments = explode('.', $path);
+        $depth        = count($pathSegments);
+
+        foreach ($patterns as $pattern) {
+            $patternSegments = explode('.', $pattern);
+            if (count($patternSegments) <= $depth) {
+                continue;
+            }
+
+            $matches = true;
+            foreach ($pathSegments as $index => $segment) {
+                $patternSegment = $patternSegments[$index];
+                if ($patternSegment !== '*' && $patternSegment !== $segment) {
+                    $matches = false;
+                    break;
+                }
+            }
+
+            if ($matches) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param array<string, mixed> $data
+     * @return list<ValidationViolation>
      */
     private function executeRule(
         ValidationRuleInterface $rule,
@@ -155,19 +235,37 @@ final class Validator implements ValidatorInterface
             $rule->setRuntimeState($data, $context);
         }
 
-        if ($rule instanceof RuleSpecificationInterface) {
-            if ($this->ruleExecutors === null) {
-                throw new RuleExecutorNotFoundException(
-                    'Rule executor registry is not configured for specification rules.',
-                );
+        try {
+            // Вложенные правила anyOf выполняются тем же конвейером: с runtime-состоянием и executor-ами.
+            if ($rule instanceof AnyOfValidation) {
+                foreach ($rule->rules() as $nestedRule) {
+                    if ($this->executeRule($nestedRule, $value, $field, $present, $data, $context) === []) {
+                        return [];
+                    }
+                }
+
+                return [new ValidationViolation(ValidationEnum::ANY_OF->value)];
             }
 
-            $executor = $this->ruleExecutors->resolve($rule);
+            if ($rule instanceof RuleSpecificationInterface) {
+                if ($this->ruleExecutors === null) {
+                    throw new RuleExecutorNotFoundException(
+                        'Rule executor registry is not configured for specification rules.',
+                    );
+                }
 
-            return $executor->validate($rule, $value, $field, $present, $data);
+                $executor = $this->ruleExecutors->resolve($rule);
+
+                return $executor->validate($rule, $value, $field, $present, $data);
+            }
+
+            return $rule->validate($value, $field, $present, $data);
+        } finally {
+            // Правило не должно удерживать данные запроса после проверки (долгоживущие воркеры).
+            if ($rule instanceof AbstractRule) {
+                $rule->resetRuntimeState();
+            }
         }
-
-        return $rule->validate($value, $field, $present, $data);
     }
 
     /**

@@ -11,18 +11,24 @@ use PhpSoftBox\Validator\ValidationViolation;
 
 use function abs;
 use function explode;
-use function fmod;
+use function is_finite;
 use function is_float;
 use function is_int;
 use function is_numeric;
 use function is_string;
 use function ltrim;
+use function max;
 use function preg_match;
 use function preg_replace;
+use function round;
 use function rtrim;
 use function sprintf;
+use function str_contains;
+use function str_ends_with;
+use function str_repeat;
 use function strlen;
 use function strpbrk;
+use function substr;
 use function trim;
 
 /**
@@ -378,7 +384,7 @@ final class FloatValidation extends AbstractRule
             }
         }
 
-        if ($this->multipleOf !== null && !$this->isMultipleOf($float, $this->multipleOf)) {
+        if ($this->multipleOf !== null && !$this->isMultipleOf($parsed['raw'], $float, $this->multipleOf)) {
             $violations[] = new ValidationViolation(ValidationEnum::MULTIPLE_OF->value, ['multiple' => $this->multipleOf]);
         }
 
@@ -457,7 +463,7 @@ final class FloatValidation extends AbstractRule
     }
 
     /**
-     * @return array{value: float, digits: int, decimalDigits: int, isInteger: bool}|null
+     * @return array{value: float, raw: string, digits: int, decimalDigits: int, isInteger: bool}|null
      */
     private function parseNumber(mixed $value): ?array
     {
@@ -478,13 +484,15 @@ final class FloatValidation extends AbstractRule
             return null;
         }
 
-        $float = (float) $raw;
+        $float  = (float) $raw;
+        $source = $raw;
         if (strpbrk($raw, 'eE') !== false) {
             $raw        = sprintf('%.14F', $float);
             $fromString = false;
         }
 
-        if (!$fromString) {
+        // Хвостовые нули убираются только в дробной части: 100 → «100», 1.50 → «1.5».
+        if (!$fromString && str_contains($raw, '.')) {
             $raw = rtrim(rtrim($raw, '0'), '.');
         }
         $raw = $raw === '' ? '0' : $raw;
@@ -500,6 +508,7 @@ final class FloatValidation extends AbstractRule
 
         return [
             'value'         => $float,
+            'raw'           => $source,
             'digits'        => $digits,
             'decimalDigits' => $decimalDigits,
             'isInteger'     => $isInteger,
@@ -530,8 +539,77 @@ final class FloatValidation extends AbstractRule
         return abs($left - $right) < 0.000000001;
     }
 
-    private function isMultipleOf(float $value, float $divisor): bool
+    /**
+     * Проверить кратность в десятичной арифметике: значение и делитель приводятся
+     * к целым числам с общим масштабом (0.3 и 0.1 → 3 и 1), поэтому ошибки двоичного
+     * представления float не влияют на результат. Если числа не помещаются в int,
+     * используется сравнение частного с ближайшим целым с относительной погрешностью.
+     */
+    private function isMultipleOf(string $raw, float $value, float $divisor): bool
     {
-        return abs(fmod($value, $divisor)) < 0.000000001;
+        $valueParts   = $this->decimalParts($raw);
+        $divisorParts = $this->decimalParts((string) $divisor);
+
+        if ($valueParts !== null && $divisorParts !== null) {
+            $scale         = max($valueParts['scale'], $divisorParts['scale']);
+            $valueDigits   = $valueParts['digits'] . str_repeat('0', $scale - $valueParts['scale']);
+            $divisorDigits = $divisorParts['digits'] . str_repeat('0', $scale - $divisorParts['scale']);
+            $valueDigits   = ltrim($valueDigits, '0');
+            $divisorDigits = ltrim($divisorDigits, '0');
+
+            if ($valueDigits === '') {
+                return true;
+            }
+
+            if ($divisorDigits !== '' && strlen($valueDigits) <= 18 && strlen($divisorDigits) <= 18) {
+                return (int) $valueDigits % (int) $divisorDigits === 0;
+            }
+        }
+
+        $quotient = $value / $divisor;
+        if (!is_finite($quotient)) {
+            return false;
+        }
+
+        return abs($quotient - round($quotient)) <= 1e-9 * max(1.0, abs($quotient));
+    }
+
+    /**
+     * Разложить десятичную запись числа на цифры без знака и масштаб (число знаков после точки).
+     *
+     * @return array{digits: string, scale: int}|null
+     */
+    private function decimalParts(string $number): ?array
+    {
+        $match = [];
+        if (preg_match('/^[+-]?(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?\z/', trim($number), $match) !== 1) {
+            return null;
+        }
+
+        $integer  = $match[1];
+        $fraction = $match[2] ?? '';
+        $exponent = isset($match[3]) && $match[3] !== '' ? (int) $match[3] : 0;
+        if ($integer === '' && $fraction === '') {
+            return null;
+        }
+
+        if ($exponent > 30 || $exponent < -30) {
+            return null;
+        }
+
+        $digits = $integer . $fraction;
+        $scale  = strlen($fraction) - $exponent;
+        if ($scale < 0) {
+            $digits .= str_repeat('0', -$scale);
+            $scale = 0;
+        }
+
+        // Хвостовые нули дробной части не влияют на значение.
+        while ($scale > 0 && str_ends_with($digits, '0')) {
+            $digits = substr($digits, 0, -1);
+            $scale--;
+        }
+
+        return ['digits' => $digits, 'scale' => $scale];
     }
 }

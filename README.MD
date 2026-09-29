@@ -43,6 +43,12 @@ if ($result->hasErrors()) {
 - `AbstractFormValidation`
 
 Они позволяют строить form-like валидаторы поверх `Validator` и использовать единые typed getters (`getString`, `getInt`, `getBool`, ...).
+Typed getters читают `filteredData()` — только проверенные поля (см. [docs/01-usage.md](docs/01-usage.md#filtereddata)).
+
+`AbstractFormValidation::applyPayloadFilters()` (`Support\FilterPayloadApplier`) применяет фильтры
+к payload до валидации по dot‑путям и wildcard. Фильтр вызывается только для переданных полей:
+отсутствующее поле не создаётся (иначе необязательные правила получили бы `null` вместо
+«поле не передано»). Значения по умолчанию задавайте явно, а не через фильтр.
 
 ## Документация
 

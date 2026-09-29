@@ -536,19 +536,19 @@ final class StringValidation extends AbstractRule
             $violations[] = new ValidationViolation(ValidationEnum::SIZE->value, ['size' => $this->size, 'len' => $len]);
         }
 
-        if ($this->alpha && !preg_match('/^\p{L}+$/u', $value)) {
+        if ($this->alpha && !preg_match('/^\p{L}+\z/u', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::ALPHA->value);
         }
 
-        if ($this->alphaDash && !preg_match('/^[\p{L}\p{N}_-]+$/u', $value)) {
+        if ($this->alphaDash && !preg_match('/^[\p{L}\p{N}_-]+\z/u', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::ALPHA_DASH->value);
         }
 
-        if ($this->alphaNumeric && !preg_match('/^[\p{L}\p{N}]+$/u', $value)) {
+        if ($this->alphaNumeric && !preg_match('/^[\p{L}\p{N}]+\z/u', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::ALPHA_NUMERIC->value);
         }
 
-        if ($this->ascii && !preg_match('/^[\x00-\x7F]*$/', $value)) {
+        if ($this->ascii && !preg_match('/^[\x00-\x7F]*\z/', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::ASCII->value);
         }
 
@@ -584,15 +584,15 @@ final class StringValidation extends AbstractRule
             $violations[] = new ValidationViolation(ValidationEnum::UPPERCASE->value);
         }
 
-        if ($this->hexColor && !preg_match('/^#?([a-f0-9]{3}|[a-f0-9]{6})$/i', $value)) {
+        if ($this->hexColor && !preg_match('/^#?([a-f0-9]{3}|[a-f0-9]{6})\z/i', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::HEX_COLOR->value);
         }
 
-        if ($this->uuid && !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $value)) {
+        if ($this->uuid && !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::UUID->value);
         }
 
-        if ($this->ulid && !preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/', $value)) {
+        if ($this->ulid && !preg_match('/^[0-9A-HJKMNP-TV-Z]{26}\z/', $value)) {
             $violations[] = new ValidationViolation(ValidationEnum::ULID->value);
         }
 

@@ -18,6 +18,9 @@
 ### ascii
 `ascii()` — только ASCII символы.
 
+Проверки `alpha*`, `ascii`, `hexColor`, `uuid`, `ulid` применяются ко всей строке:
+завершающий перевод строки (`"abc\n"`) не допускается.
+
 ### email / url / activeUrl
 - `email()` — корректный email
 - `url()` — корректный URL

@@ -9,15 +9,15 @@ use PhpSoftBox\Validator\Support\DataPath;
 use PhpSoftBox\Validator\ValidationEnum;
 use PhpSoftBox\Validator\ValidationViolation;
 
+use function floor;
 use function in_array;
+use function is_finite;
 use function is_float;
 use function is_int;
 use function is_numeric;
 use function is_string;
 use function ltrim;
 use function preg_match;
-use function rtrim;
-use function sprintf;
 use function str_replace;
 use function strlen;
 use function strpbrk;
@@ -404,6 +404,12 @@ final class IntValidation extends AbstractRule
     }
 
     /**
+     * Разобрать целое число.
+     *
+     * Принимаются int, float без дробной части (5.0) и строки вида «5», «+5», «-5», «5.0»
+     * (дробная часть только из нулей). Значения вне диапазона int (в том числе строки,
+     * которые PHP при приведении «обрезал» бы до PHP_INT_MAX) не являются целым числом.
+     *
      * @return array{value: int, raw: string}|null
      */
     private function parseInt(mixed $value): ?array
@@ -413,34 +419,55 @@ final class IntValidation extends AbstractRule
         }
 
         if (is_float($value)) {
-            if ((int) $value !== $value) {
+            if (!is_finite($value) || floor($value) !== $value) {
                 return null;
             }
 
-            $raw = $this->normalizeFloat($value);
+            // Граница 2^63 для float: всё, что не меньше, в int не помещается.
+            if ($value >= 9.2233720368547758E18 || $value < -9.2233720368547758E18) {
+                return null;
+            }
 
-            return ['value' => (int) $value, 'raw' => $raw];
+            $int = (int) $value;
+
+            return ['value' => $int, 'raw' => (string) $int];
         }
 
         if (is_string($value)) {
-            $trimmed = trim($value);
-            if ($trimmed === '' || preg_match('/^[+-]?\d+$/', $trimmed) !== 1) {
-                return null;
-            }
-
-            return ['value' => (int) $trimmed, 'raw' => $trimmed];
+            return $this->parseIntString(trim($value));
         }
 
         if (is_numeric($value)) {
-            $raw = (string) $value;
-            if (preg_match('/^[+-]?\d+$/', $raw) !== 1) {
-                return null;
-            }
-
-            return ['value' => (int) $raw, 'raw' => $raw];
+            return $this->parseIntString((string) $value);
         }
 
         return null;
+    }
+
+    /**
+     * @return array{value: int, raw: string}|null
+     */
+    private function parseIntString(string $value): ?array
+    {
+        $match = [];
+        if (preg_match('/^([+-]?)(\d+)(?:\.0+)?\z/', $value, $match) !== 1) {
+            return null;
+        }
+
+        $sign   = $match[1] === '-' ? '-' : '';
+        $digits = ltrim($match[2], '0');
+        if ($digits === '') {
+            return ['value' => 0, 'raw' => $match[2]];
+        }
+
+        $int = (int) ($sign . $digits);
+
+        // Переполнение: (int) насыщает значение до PHP_INT_MAX/PHP_INT_MIN.
+        if ((string) $int !== $sign . $digits) {
+            return null;
+        }
+
+        return ['value' => $int, 'raw' => $match[1] . $match[2]];
     }
 
     private function countDigits(string $raw): int
@@ -449,15 +476,5 @@ final class IntValidation extends AbstractRule
         $raw = strpbrk($raw, '.') === false ? $raw : str_replace('.', '', $raw);
 
         return strlen($raw);
-    }
-
-    private function normalizeFloat(float $value): string
-    {
-        $raw = (string) $value;
-        if (strpbrk($raw, 'eE') !== false) {
-            $raw = sprintf('%.14F', $value);
-        }
-
-        return rtrim(rtrim($raw, '0'), '.');
     }
 }

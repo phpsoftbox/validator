@@ -145,10 +145,12 @@ final class FilterPayloadApplierTest extends TestCase
     }
 
     /**
-     * Проверяет, что для отсутствующего точечного пути фильтр получает null и может записать значение.
+     * Проверяет, что фильтр не вызывается для отсутствующего точечного пути и поле не создаётся.
+     *
+     * @see FilterPayloadApplier::apply()
      */
     #[Test]
-    public function appliesFilterForMissingExactPath(): void
+    public function skipsMissingExactPath(): void
     {
         $applier = new FilterPayloadApplier();
 
@@ -159,9 +161,9 @@ final class FilterPayloadApplierTest extends TestCase
             ],
         );
 
+        // Непереданное поле остаётся непереданным, а не превращается в null или значение фильтра.
         self::assertSame([], $result->errors);
-        self::assertSame('unknown', $result->payload['user']['phone']);
-        self::assertSame('Alice', $result->payload['user']['name']);
+        self::assertSame(['user' => ['name' => 'Alice']], $result->payload);
     }
 
     /**

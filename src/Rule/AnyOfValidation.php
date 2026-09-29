@@ -24,6 +24,20 @@ final class AnyOfValidation extends AbstractRule
         $this->rules = $rules;
     }
 
+    /**
+     * Вложенные правила (используются валидатором для выполнения через общий конвейер).
+     *
+     * @return list<ValidationRuleInterface>
+     */
+    public function rules(): array
+    {
+        return $this->rules;
+    }
+
+    /**
+     * Прямой вызов проверяет только обычные правила; specification-правила и runtime-состояние
+     * (route()/context()) поддерживаются при выполнении через Validator.
+     */
     public function validate(mixed $value, string $field, bool $present, array $data): array
     {
         foreach ($this->rules as $rule) {

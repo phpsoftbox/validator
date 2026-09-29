@@ -50,6 +50,11 @@ final class FilterPayloadApplier
                 continue;
             }
 
+            // Отсутствующее поле не создаётся: иначе optional-правила получат null вместо «не передано».
+            if (!DataPath::has($payload, $path)) {
+                continue;
+            }
+
             try {
                 $value = $this->run(DataPath::get($payload, $path), $filter);
             } catch (FilterPayloadException $exception) {
