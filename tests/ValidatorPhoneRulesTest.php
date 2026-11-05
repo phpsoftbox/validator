@@ -8,10 +8,13 @@ use PhpSoftBox\Filter\Phone\Drivers\PhoneDriverEnum;
 use PhpSoftBox\Validator\Rule\PhoneValidation;
 use PhpSoftBox\Validator\Validator;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversMethod;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(PhoneValidation::class)]
+#[CoversMethod(PhoneValidation::class, 'international')]
+#[CoversMethod(PhoneValidation::class, 'validate')]
 final class ValidatorPhoneRulesTest extends TestCase
 {
     /**
@@ -93,5 +96,44 @@ final class ValidatorPhoneRulesTest extends TestCase
             ['phone' => [new PhoneValidation(PhoneDriverEnum::BY)]],
         );
         self::assertFalse($by->hasErrors());
+    }
+
+    /**
+     * Проверяет, что в режиме нескольких стран принимаются номер Китая и сохранённый E.164 России.
+     *
+     * @see PhoneValidation::international()
+     * @see PhoneValidation::validate()
+     */
+    #[Test]
+    public function internationalPhoneValidationAcceptsNumbersOfSupportedCountries(): void
+    {
+        $validator = new Validator();
+        $rules     = [
+            'cn' => [new PhoneValidation()->international()],
+            'ru' => [new PhoneValidation()->international()],
+        ];
+
+        $result = $validator->validate(['cn' => '+86 138 1234 5678', 'ru' => '+79991234567'], $rules);
+
+        self::assertFalse($result->hasErrors());
+    }
+
+    /**
+     * Проверяет, что номер страны вне списка допустимых отклоняется.
+     *
+     * @see PhoneValidation::international()
+     * @see PhoneValidation::validate()
+     */
+    #[Test]
+    public function internationalPhoneValidationRejectsCountryOutsideList(): void
+    {
+        $validator = new Validator();
+        $rules     = [
+            'phone' => [new PhoneValidation()->international([PhoneDriverEnum::RU])],
+        ];
+
+        $result = $validator->validate(['phone' => '+86 138 1234 5678'], $rules);
+
+        self::assertSame(['Поле phone должно быть корректным номером телефона.'], $result->errorBag()->get('phone'));
     }
 }

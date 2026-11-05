@@ -6,6 +6,7 @@ namespace PhpSoftBox\Validator\Rule;
 
 use PhpSoftBox\Filter\Phone\Drivers\PhoneCountryDriverInterface;
 use PhpSoftBox\Filter\Phone\Drivers\PhoneDriverEnum;
+use PhpSoftBox\Filter\Phone\PhoneNumber;
 use PhpSoftBox\Validator\ValidationEnum;
 use PhpSoftBox\Validator\ValidationViolation;
 
@@ -15,8 +16,11 @@ use function is_string;
 /**
  * Проверяет корректность номера телефона через драйверы стран.
  *
+ * По умолчанию — номер одной страны (драйвер RU). {@see self::international()} принимает номер любой поддержанной
+ * страны (или из списка допустимых), в том числе сохранённый E.164.
+ *
  * Значение не изменяется: для приведения номера к формату хранения используйте
- * фильтр `PhoneFilter` / `FilterAdapter::phone()` из `phpsoftbox/filter`.
+ * фильтр `PhoneFilter` / `InternationalPhoneFilter` из `phpsoftbox/filter`.
  */
 final class PhoneValidation extends AbstractRule
 {
@@ -25,6 +29,15 @@ final class PhoneValidation extends AbstractRule
      */
     private PhoneCountryDriverInterface $driver;
 
+    /**
+     * Режим нескольких стран: допустимые страны (null — все); false — режим одной страны.
+     *
+     * @var list<PhoneDriverEnum>|false|null
+     */
+    private array|false|null $countries = false;
+
+    private bool $mobileOnly = true;
+
     public function __construct(PhoneDriverEnum $driver = PhoneDriverEnum::RU)
     {
         $this->driver = $driver->create();
@@ -32,7 +45,21 @@ final class PhoneValidation extends AbstractRule
 
     public function driver(PhoneDriverEnum $driver): self
     {
-        $this->driver = $driver->create();
+        $this->driver    = $driver->create();
+        $this->countries = false;
+
+        return $this;
+    }
+
+    /**
+     * Номер любой поддержанной страны; $countries — допустимые страны (null — все), $mobileOnly — как у драйвера.
+     *
+     * @param list<PhoneDriverEnum>|null $countries
+     */
+    public function international(?array $countries = null, bool $mobileOnly = true): self
+    {
+        $this->countries  = $countries;
+        $this->mobileOnly = $mobileOnly;
 
         return $this;
     }
@@ -44,6 +71,12 @@ final class PhoneValidation extends AbstractRule
         }
 
         $raw = (string) $value;
+
+        if ($this->countries !== false) {
+            return PhoneNumber::parse($raw, candidates: $this->countries, mobileOnly: $this->mobileOnly) instanceof PhoneNumber
+                ? []
+                : [new ValidationViolation(ValidationEnum::PHONE->value, ['reason' => ''])];
+        }
 
         // Правило только проверяет номер; нормализация значения выполняется фильтром PhoneFilter.
         $result = $this->driver->format($raw, prepareForDb: true, withCountryCode: false);
