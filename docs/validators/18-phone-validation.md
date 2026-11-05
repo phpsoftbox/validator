@@ -2,7 +2,7 @@
 
 Проверяет, что значение является корректным номером телефона.
 
-Используются встроенные драйверы стран (RU/KZ/AM/AZ/BY) и проверка длины/кодов операторов.
+Используются встроенные драйверы стран (RU/KZ/AM/AZ/BY/CN) и проверка длины/кодов операторов.
 
 ## Пример
 
@@ -27,6 +27,13 @@ $rule = (new PhoneValidation())
 ```
 
 - `driver()` — выбор драйвера страны (можно передать и в конструктор).
+- `international(?array $countries = null, bool $mobileOnly = true)` — номер любой поддержанной страны или из
+  списка `$countries`, в том числе сохранённый E.164 (`+8613812345678`); страна определяется по номеру
+  (`PhoneNumber::parse()` из `phpsoftbox/filter`).
+
+```php
+$rule = (new PhoneValidation())->international([PhoneDriverEnum::RU, PhoneDriverEnum::CN]);
+```
 
 ## Нормализация номера
 
@@ -45,7 +52,8 @@ $phoneFilter = new PhoneFilter(
 );
 ```
 
-или `FilterAdapter::phone($value, prepareForDb: true, withCountryCode: false)`.
+или `FilterAdapter::phone($value, prepareForDb: true, withCountryCode: false)`. Для номеров нескольких стран —
+`InternationalPhoneFilter` (E.164).
 
 Методы `prepareForDb()` и `withCountryCode()` удалены из `PhoneValidation`:
 они не влияли на результат проверки.
